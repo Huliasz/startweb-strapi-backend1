@@ -1,0 +1,18 @@
+{
+  "kind": "collectionType",
+  "collectionName": "test_hooks",
+  "info": {
+    "singularName": "test-hook",
+    "pluralName": "test-hooks",
+    "displayName": "TestHook"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "name": {
+      "type": "string"
+    }
+  }
+}
