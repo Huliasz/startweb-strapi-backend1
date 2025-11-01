@@ -1,17 +1,25 @@
+// config/plugins.js
+
 module.exports = ({ env }) => ({
-  // ...
+  // ... other plugin configurations if you have any ...
+
   email: {
     config: {
-      provider: "sendgrid", // For community providers pass the full package name (e.g. provider: 'strapi-provider-email-mandrill')
+      provider: "sendgrid", // Use the SendGrid provider
       providerOptions: {
-        apiKey: env("SENDGRID_API_KEY"),
+        apiKey: env("SENDGRID_API_KEY"), // Your API key from the .env file
       },
       settings: {
-        defaultFrom: "kontakt@startweb.com.pl",
-        defaultReplyTo: "kontakt@startweb.com.pl",
-        testAddress: "kontakt@startweb.com.pl",
+        // Ensure this email is verified as a sender in SendGrid
+        defaultFrom: env("SENDGRID_DEFAULT_FROM", "kontakt@startweb.com.pl"),
+        // Email address replies should go to
+        defaultReplyTo: env(
+          "SENDGRID_DEFAULT_REPLY_TO",
+          "kontakt@startweb.com.pl"
+        ),
       },
     },
   },
-  // ...
+
+  // ... other configurations ...
 });
