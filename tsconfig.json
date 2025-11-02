@@ -17,12 +17,10 @@
     "allowJs": true // <-- ADD THIS LINE
   },
   "include": [
-    "src/**/*.ts",
-    "src/**/*.js",
-    "src/**/*.json",
-    "config",
-    "types",
-    "./package.json"
+    "./",
+    "./**/*.ts",
+    "./**/*.js", // This ensures TS *sees* the JS files
+    "src/**/*.json"
   ],
   "exclude": [
     "node_modules/",
