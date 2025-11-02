@@ -1,22 +1,39 @@
 // src/api/submission/content-types/submission/lifecycles.js
+
+// Używamy Set do śledzenia ID zgłoszeń, które są AKTUALNIE przetwarzane.
+// Zapobiega to podwójnemu wysyłaniu e-maili, jeśli hook jest ładowany/wywoływany podwójnie.
+const processedSubmissionIds = new Set();
+
 module.exports = {
   async afterCreate(event) {
-    console.log(
-      "--- afterCreate lifecycle hook triggered (Attempting SendGrid) ---"
-    );
-    const { result } = event;
+    const { result } = event; // Dane zapisanego zgłoszenia
 
-    // Pobieramy adresata (Ciebie) i nadawcę (Twój adres SendGrid) ze zmiennych środowiskowych
+    // --- POCZĄTEK ZABEZPIECZENIA PRZED PODWÓJNYM URUCHOMIENIEM ---
+    if (processedSubmissionIds.has(result.id)) {
+      // Jeśli ID jest już przetwarzane (przez drugie, zduplikowane wywołanie), przerwij.
+      console.warn(
+        `[LIFECYCLE] Zduplikowane wywołanie afterCreate dla ID: ${result.id}. Pomijanie wysyłki e-mail.`
+      );
+      return; // Zakończ, aby nie wysyłać ponownie
+    }
+    // Natychmiast dodaj ID do Set, aby zablokować kolejne wywołania dla tego ID
+    processedSubmissionIds.add(result.id);
+    // --- KONIEC ZABEZPIECZENIA ---
+
+    console.log(
+      `--- afterCreate hook triggered (ID: ${result.id}) (Attempting SendGrid) ---`
+    );
+
     const recipientEmail =
       process.env.RECIPIENT_EMAIL || "kontakt@startweb.com.pl";
-    const senderEmail = process.env.SENDGRID_DEFAULT_FROM; // MUSI być ustawione w Strapi Cloud
+    const senderEmail = process.env.SENDGRID_DEFAULT_FROM;
 
-    // Sprawdzenie krytyczne: Czy mamy nadawcę?
     if (!senderEmail) {
       console.error(
         "--- ERROR: Zmienna środowiskowa SENDGRID_DEFAULT_FROM nie jest ustawiona! Nie można wysłać e-maila. ---"
       );
-      return; // Przerwij funkcję, jeśli brakuje nadawcy
+      processedSubmissionIds.delete(result.id); // Usuń blokadę, bo wystąpił błąd konfiguracji
+      return;
     }
 
     try {
@@ -24,7 +41,7 @@ module.exports = {
       console.log(`Attempting to send email to owner (${recipientEmail})...`);
       await strapi.plugins["email"].services.email.send({
         to: recipientEmail,
-        from: senderEmail, // WAŻNE: Przywrócone dla SendGrid
+        from: senderEmail,
         replyTo: result.email,
         subject: `Nowe zapytanie z formularza: ${result.name} (${result.email})`,
         html: `
@@ -37,31 +54,40 @@ module.exports = {
                     <p>${result.message ? result.message.replace(/\n/g, "<br>") : "Brak wiadomości"}</p> 
                 `,
       });
-      console.log("Email to owner potentially sent.");
+      console.log("Email to owner sent.");
 
       // --- E-mail do Klienta (Potwierdzenie) ---
       console.log(
         `Attempting to send confirmation email to client (${result.email})...`
       );
       await strapi.plugins["email"].services.email.send({
-        to: result.email, // Adres klienta
-        from: senderEmail, // WAŻNE: Przywrócone dla SendGrid
-        replyTo: recipientEmail, // Ustaw 'replyTo' na swój adres
+        to: result.email,
+        from: senderEmail,
+        replyTo: recipientEmail,
         subject: "Potwierdzenie otrzymania zapytania - StartWeb",
         html: `
                     <p>Witaj ${result.name},</p>
-                    <p>Dziękujemy za Twoje zapytanie! Otrzymaliśmy Twoją wiadomość i wkrótce się z Tobą skontaktujemy (zazwyczaj w ciągu 24 godzin).</p>
+                    <p>Dziękujemy za Twoje zapytanie! Wiadomość został otrzymna i wkrótce się z Tobą skontaktujemy (zazwyczaj w ciągu 24 godzin).</p>
                     <p>Pozdrawiamy serdecznie,</p>
                     <p>Zespół StartWeb</p>
                 `,
       });
-      console.log("Confirmation email to client potentially sent.");
+      console.log("Confirmation email to client sent.");
     } catch (err) {
       console.error("--- ERROR SENDING EMAIL (SendGrid) ---");
       console.error("Error Details:", err);
+      // Jeśli wystąpił błąd, usuwamy ID z Set, aby umożliwić ewentualną ponowną próbę
+      processedSubmissionIds.delete(result.id);
       if (err.response) {
         console.error("SendGrid Response Body:", err.response.body);
       }
+    } finally {
+      // Czyścimy blokadę po 10 sekundach.
+      // Opóźnienie jest na wypadek, gdyby zduplikowane wywołania nie nastąpiły natychmiast.
+      setTimeout(() => {
+        processedSubmissionIds.delete(result.id);
+        console.log(`[LIFECYCLE] Usunięto blokadę dla ID: ${result.id}`);
+      }, 10000); // 10 sekund
     }
   },
 };
