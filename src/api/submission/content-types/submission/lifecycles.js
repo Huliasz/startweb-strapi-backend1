@@ -1,27 +1,29 @@
 // src/api/submission/content-types/submission/lifecycles.js
 
-// Używamy Set do śledzenia ID zgłoszeń, które są AKTUALNIE przetwarzane.
-// Zapobiega to podwójnemu wysyłaniu e-maili, jeśli hook jest ładowany/wywoływany podwójnie.
-const processedSubmissionIds = new Set();
+// Używamy Set do śledzenia UNIKALNYCH KLUCZY ZGŁOSZEŃ (e-mail + wiadomość)
+// Zapobiega to podwójnemu wysyłaniu e-maili, nawet jeśli Strapi utworzy dwa wpisy w bazie.
+const processingSubmissions = new Set();
 
 module.exports = {
   async afterCreate(event) {
-    const { result } = event; // Dane zapisanego zgłoszenia
+    const { result } = event;
 
-    // --- POCZĄTEK ZABEZPIECZENIA PRZED PODWÓJNYM URUCHOMIENIEM ---
-    if (processedSubmissionIds.has(result.id)) {
-      // Jeśli ID jest już przetwarzane (przez drugie, zduplikowane wywołanie), przerwij.
+    // Tworzymy unikalny klucz na podstawie treści, a nie ID
+    const uniqueKey = `${result.email || ""}::${result.message || ""}`;
+
+    // --- ZABEZPIECZENIE PRZED DUPLIKATAMI TREŚCI ---
+    if (processingSubmissions.has(uniqueKey)) {
       console.warn(
-        `[LIFECYCLE] Zduplikowane wywołanie afterCreate dla ID: ${result.id}. Pomijanie wysyłki e-mail.`
+        `[LIFECYCLE] Wykryto zduplikowane zgłoszenie (Klucz: ${uniqueKey}, ID: ${result.id}). Pomijanie wysyłki e-mail.`
       );
       return; // Zakończ, aby nie wysyłać ponownie
     }
-    // Natychmiast dodaj ID do Set, aby zablokować kolejne wywołania dla tego ID
-    processedSubmissionIds.add(result.id);
+    // Natychmiast dodaj klucz, aby zablokować kolejne wywołania
+    processingSubmissions.add(uniqueKey);
     // --- KONIEC ZABEZPIECZENIA ---
 
     console.log(
-      `--- afterCreate hook triggered (ID: ${result.id}) (Attempting SendGrid) ---`
+      `--- afterCreate hook triggered (ID: ${result.id}, Klucz: ${uniqueKey}) (Attempting SendGrid) ---`
     );
 
     const recipientEmail =
@@ -30,9 +32,9 @@ module.exports = {
 
     if (!senderEmail) {
       console.error(
-        "--- ERROR: Zmienna środowiskowa SENDGRID_DEFAULT_FROM nie jest ustawiona! Nie można wysłać e-maila. ---"
+        "--- ERROR: Zmienna środowiskowa SENDGRID_DEFAULT_FROM nie jest ustawiona! ---"
       );
-      processedSubmissionIds.delete(result.id); // Usuń blokadę, bo wystąpił błąd konfiguracji
+      processingSubmissions.delete(uniqueKey); // Usuń blokadę
       return;
     }
 
@@ -76,17 +78,15 @@ module.exports = {
     } catch (err) {
       console.error("--- ERROR SENDING EMAIL (SendGrid) ---");
       console.error("Error Details:", err);
-      // Jeśli wystąpił błąd, usuwamy ID z Set, aby umożliwić ewentualną ponowną próbę
-      processedSubmissionIds.delete(result.id);
       if (err.response) {
         console.error("SendGrid Response Body:", err.response.body);
       }
     } finally {
       // Czyścimy blokadę po 10 sekundach.
-      // Opóźnienie jest na wypadek, gdyby zduplikowane wywołania nie nastąpiły natychmiast.
+      // To daje czas drugiemu (zduplikowanemu) wywołaniu hooka na bycie przechwyconym przez blokadę.
       setTimeout(() => {
-        processedSubmissionIds.delete(result.id);
-        console.log(`[LIFECYCLE] Usunięto blokadę dla ID: ${result.id}`);
+        processingSubmissions.delete(uniqueKey);
+        console.log(`[LIFECYCLE] Usunięto blokadę dla Klucza: ${uniqueKey}`);
       }, 10000); // 10 sekund
     }
   },
